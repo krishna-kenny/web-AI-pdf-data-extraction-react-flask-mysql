@@ -1,0 +1,93 @@
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #007bff;
+  color: white;
+  padding: 1rem 2rem;
+  width: 100vw;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+  position: relative;
+}
+
+.nav-logo {
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+/* Hide toggle button by default */
+.nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 24px;
+  height: 18px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Hamburger lines */
+.nav-toggle .hamburger {
+  height: 3px;
+  background-color: white;
+  border-radius: 2px;
+}
+
+/* Nav links default desktop style */
+.nav-links {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.nav-links span {
+  cursor: pointer;
+  font-weight: 500;
+  padding-bottom: 4px;
+  transition: border-bottom 0.2s ease;
+  white-space: nowrap;
+}
+
+.nav-links span:hover,
+.nav-links .active {
+  border-bottom: 2px solid white;
+}
+
+/* Responsive: small screens */
+@media (max-width: 600px) {
+  /* Show hamburger */
+  .nav-toggle {
+    display: flex;
+  }
+
+  /* Hide nav links by default */
+  .nav-links {
+    display: none;
+    flex-direction: column;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background-color: #007bff;
+    width: 150px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    border-radius: 0 0 8px 8px;
+    z-index: 1000;
+  }
+
+  /* Show nav links when menuOpen */
+  .nav-links.open {
+    display: flex;
+  }
+
+  .nav-links span {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .nav-links span:last-child {
+    border-bottom: none;
+  }
+}
