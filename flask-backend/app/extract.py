@@ -1,82 +1,147 @@
-import fitz  # PyMuPDF
-from pdfminer.high_level import extract_text as pdfminer_extract
-from PIL import Image
-import pytesseract
-import pdfplumber
-import io
+import boto3
+import time
 import os
+import csv
 
-def extract_text_and_images(pdf_path):
-    if not os.path.isfile(pdf_path):
-        raise ValueError("Invalid PDF path")
+# ── CONFIGURATION CONSTANTS ─────────────────────────────────────────────
+AWS_ACCESS_KEY_ID     = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_SESSION_TOKEN     = None               # or "YOUR_SESSION_TOKEN" if needed
+AWS_REGION            = "ap-south-1"
 
-    base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+S3_BUCKET        = "cargofl-ai-invoice-reader-test"      # replace with your bucket
+DOCUMENT_KEY     = "FTL_Bill.pdf"      # S3 key for the PDF
+OUTPUT_DIR       = "./textract_tables"     # local dir to write CSVs
+POLL_INTERVAL    = 5                       # seconds between status checks
+# ────────────────────────────────────────────────────────────────────────
 
-    # Create output folders
-    image_dir = "../uploads/extracted_images"
-    text_dir = "../extract_raw_text"
-    os.makedirs(image_dir, exist_ok=True)
-    os.makedirs(text_dir, exist_ok=True)
+# —— SETUP CLIENT ——  
+textract = boto3.client(
+    "textract",
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    aws_session_token=AWS_SESSION_TOKEN,
+    region_name=AWS_REGION
+)
 
-    # Output text file
-    text_file_path = os.path.join(text_dir, f"{base_name}.txt")
+def start_table_detection(bucket, key):
+    """Starts an async Textract job to detect TABLES."""
+    resp = textract.start_document_analysis(
+        DocumentLocation={"S3Object": {"Bucket": bucket, "Name": key}},
+        FeatureTypes=["TABLES"]
+    )
+    return resp["JobId"]
 
-    with open(text_file_path, "w", encoding="utf-8") as text_file:
-        # --- Pure text ---
-        print("[INFO] Extracting pure text...")
-        pure_text = pdfminer_extract(pdf_path)
-        text_file.write("Pure Text:\n")
-        text_file.write(pure_text.strip() + "\n\n")
+def is_job_complete(job_id):
+    """Checks Textract job status."""
+    resp = textract.get_document_analysis(JobId=job_id)
+    return resp["JobStatus"], resp
 
-        # --- Tables ---
-        print("[INFO] Extracting tables...")
-        with pdfplumber.open(pdf_path) as pdf:
-            table_count = 1
-            for page_num, page in enumerate(pdf.pages, 1):
-                tables = page.extract_tables()
-                for table in tables:
-                    if not table: continue
-                    text_file.write(f"Table {table_count} (Page {page_num}):\n")
-                    for row in table:
-                        line = ', '.join([cell.strip() if cell else "" for cell in row])
-                        text_file.write(line + "\n")
-                    text_file.write("\n")
-                    table_count += 1
+def get_all_results(job_id):
+    """Retrieves paginated results."""
+    pages = []
+    next_token = None
 
-        # --- Images and OCR ---
-        print("[INFO] Extracting images and performing OCR...")
-        doc = fitz.open(pdf_path)
-        img_count = 1
+    while True:
+        if next_token:
+            resp = textract.get_document_analysis(JobId=job_id, NextToken=next_token)
+        else:
+            resp = textract.get_document_analysis(JobId=job_id)
+        pages.append(resp)
+        next_token = resp.get("NextToken")
+        if not next_token:
+            break
+    return pages
 
-        for page_index in range(len(doc)):
-            for img_index, img in enumerate(doc.get_page_images(page_index)):
-                xref = img[0]
-                base_image = doc.extract_image(xref)
-                image_bytes = base_image["image"]
-                ext = base_image["ext"]
+def extract_tables(pages):
+    """
+    From Textract response pages, yield each table as a list of rows,
+    where each row is a list of cell texts in column order.
+    """
+    # collect all blocks
+    blocks = []
+    for page in pages:
+        blocks.extend(page["Blocks"])
 
-                # Save image
-                image_filename = f"{base_name}_{img_count}.{ext}"
-                image_path = os.path.join(image_dir, image_filename)
-                with open(image_path, "wb") as f:
-                    f.write(image_bytes)
+    # index blocks by Id for lookups
+    block_map = {b["Id"]: b for b in blocks}
 
-                # OCR the image
-                img_obj = Image.open(io.BytesIO(image_bytes))
-                ocr_text = pytesseract.image_to_string(img_obj)
+    # find table blocks
+    tables = [b for b in blocks if b["BlockType"] == "TABLE"]
 
-                # Write OCR result to text file
-                text_file.write(f"Image Text {img_count}:\n")
-                text_file.write(ocr_text.strip() + "\n\n")
+    for tbl_idx, table in enumerate(tables, start=1):
+        # find cell blocks that belong to this table
+        cell_blocks = []
+        for rel in table.get("Relationships", []):
+            if rel["Type"] == "CHILD":
+                for cid in rel["Ids"]:
+                    cb = block_map[cid]
+                    if cb["BlockType"] == "CELL":
+                        cell_blocks.append(cb)
 
-                img_count += 1
+        # determine max row/col to size the grid
+        max_row = max(cb["RowIndex"] for cb in cell_blocks)
+        max_col = max(cb["ColumnIndex"] for cb in cell_blocks)
 
-        print(f"[INFO] Extraction complete. Text saved to '{text_file_path}'.")
-        print(f"[INFO] {img_count - 1} image(s) saved to '{image_dir}'.")
+        # initialize empty grid
+        grid = [["" for _ in range(max_col)] for __ in range(max_row)]
+
+        # fill grid
+        for cb in cell_blocks:
+            # get text inside the cell
+            text = ""
+            for crel in cb.get("Relationships", []):
+                if crel["Type"] == "CHILD":
+                    for tid in crel["Ids"]:
+                        tb = block_map[tid]
+                        if tb["BlockType"] == "WORD":
+                            text += tb["Text"] + " "
+                        elif tb["BlockType"] == "SELECTION_ELEMENT" and tb["SelectionStatus"] == "SELECTED":
+                            text += "X "
+            text = text.strip()
+
+            # place in grid (row/col indexes are 1-based)
+            r = cb["RowIndex"] - 1
+            c = cb["ColumnIndex"] - 1
+            grid[r][c] = text
+
+        yield tbl_idx, grid
+
+def save_tables_to_csv(tables, outdir):
+    """Write each table grid to its own CSV file."""
+    os.makedirs(outdir, exist_ok=True)
+    for tbl_idx, grid in tables:
+        csv_path = os.path.join(outdir, f"table_{tbl_idx}.csv")
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            for row in grid:
+                writer.writerow(row)
+        print(f"[INFO] Wrote Table {tbl_idx} → {csv_path}")
+
+def main():
+    print("[INFO] Starting Textract TABLE analysis job...")
+    job_id = start_table_detection(S3_BUCKET, DOCUMENT_KEY)
+    print(f"[INFO] Job started. JobId: {job_id}")
+
+    # wait for completion
+    while True:
+        status, resp = is_job_complete(job_id)
+        print(f"[INFO] Job status: {status}")
+        if status in ("SUCCEEDED", "FAILED"):
+            break
+        time.sleep(POLL_INTERVAL)
+
+    if status == "SUCCEEDED":
+        print("[INFO] Job succeeded; fetching results...")
+        pages = get_all_results(job_id)
+        tables = list(extract_tables(pages))
+        if tables:
+            save_tables_to_csv(tables, OUTPUT_DIR)
+            print(f"[INFO] Extracted {len(tables)} table(s).")
+        else:
+            print("[WARN] No tables found in document.")
+    else:
+        print(f"[ERROR] Textract job failed: {resp}")
 
 if __name__ == "__main__":
-    pdf_path = "../uploads/FTL Bill.pdf"
-    try:
-        extract_text_and_images(pdf_path)
-    except Exception as e:
-        print(f"[ERROR] {e}")
+    main()
