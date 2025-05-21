@@ -1,0 +1,132 @@
+.search-page {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    font-family: Arial, sans-serif;
+    background-color: #f5f7fa;
+    margin: 0;
+  }
+  
+  .filter-bar {
+    position: sticky;
+    top: 0;
+    background: #fff;
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    padding: 12px 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    z-index: 10;
+    flex-wrap: nowrap;
+  }
+  
+  .filter-item {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  /* Search input container grows, others fixed */
+  .search-item {
+    flex-grow: 1;
+    min-width: 200px;
+  }
+  
+  /* Label styles */
+  .filter-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 4px;
+    user-select: none;
+  }
+  
+  /* Inputs and select */
+  .filter-bar input[type="text"],
+  .filter-bar input[type="date"],
+  .filter-bar select {
+    font-family: inherit;
+    font-size: 14px;
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    transition: border-color 0.2s ease;
+    outline-offset: 2px;
+    outline-color: transparent;
+    outline-style: solid;
+    outline-width: 2px;
+    box-sizing: border-box;
+  }
+  
+  /* Focus states */
+  .filter-bar input[type="text"]:focus,
+  .filter-bar input[type="date"]:focus,
+  .filter-bar select:focus {
+    border-color: #007bff;
+    outline-color: #007bff;
+  }
+  
+  /* Search input grows */
+  .search-input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  
+  /* Fixed width inputs */
+  .date-input,
+  .sort-select {
+    width: 140px;
+    flex-shrink: 0;
+  }
+  
+  /* Search button */
+  .search-button {
+    margin-top: 22px; /* align with inputs */
+    padding: 10px 24px;
+    background-color: #007bff;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+    transition: background-color 0.3s ease;
+  }
+  
+  .search-button:hover {
+    background-color: #0056b3;
+  }
+  
+  /* Results fill remaining space */
+  .results-area {
+    flex-grow: 1;
+    overflow-y: auto;
+    background: white;
+    margin: 16px;
+    padding: 20px;
+    border-radius: 6px;
+    box-shadow: 0 0 8px rgba(0,0,0,0.05);
+    color: #333;
+  }
+  
+  /* Responsive: stack filters vertically on narrow screens */
+  @media (max-width: 600px) {
+    .filter-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+    .filter-item {
+      width: 100%;
+    }
+    .date-input,
+    .sort-select,
+    .search-input {
+      width: 100%;
+    }
+    .search-button {
+      margin-top: 0;
+      width: 100%;
+    }
+  }
+  
