@@ -9,6 +9,7 @@ export default function Auth({ onAuthSuccess }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (username === "k" && password === "k") {
+      localStorage.setItem("username", username); // Store logged-in user
       setError("");
       onAuthSuccess();
     } else {

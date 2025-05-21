@@ -1,30 +1,23 @@
 from flask import Blueprint, request, jsonify
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
-import boto3
+from app.upload import upload_files_to_s3
+from app import extract
+import subprocess
+import sys
 import os
-from dotenv import load_dotenv
-
-# ── Load environment variables ──────────────────────────────────────────
-load_dotenv()
-
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
-S3_BUCKET = os.getenv("S3_BUCKET", "cargofl-ai-invoice-reader-test")
-S3_UPLOAD_PREFIX = "uploads"
-ALLOWED_EXTENSIONS = {'pdf'}
-# ────────────────────────────────────────────────────────────────────────
+import json
 
 main = Blueprint('main', __name__)
 CORS(main, resources={r"/api/*": {"origins": "*"}})
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @main.route('/api/invoices/upload', methods=['POST'])
 def upload_files():
     try:
+        user_id = request.form.get("user_id")
+        if not user_id:
+            return jsonify({"error": "User ID missing"}), 400
+
         if 'files' not in request.files:
             return jsonify({"error": "No files part in the request"}), 400
 
@@ -32,40 +25,8 @@ def upload_files():
         if not files:
             return jsonify({"error": "No files selected"}), 400
 
-        # Use credentials from .env
-        s3 = boto3.client(
-            "s3",
-            region_name=AWS_REGION,
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=AWS_SECRET_ACCESS_KEY
-        )
-
-        uploaded = []
-        errors = []
-
-        for file in files:
-            original_name = file.filename or ""
-            if not allowed_file(original_name):
-                errors.append(f"Invalid file type: {original_name}")
-                continue
-
-            filename = secure_filename(original_name)
-            key = f"{S3_UPLOAD_PREFIX}/{filename}"
-
-            try:
-                s3.upload_fileobj(
-                    Fileobj=file.stream,
-                    Bucket=S3_BUCKET,
-                    Key=key,
-                    ExtraArgs={
-                        'ContentType': file.mimetype,
-                        'ACL': 'private'
-                    }
-                )
-                uploaded.append(key)
-            except Exception as e:
-                print(f"[ERROR] S3 upload failed for {filename}: {e}")
-                errors.append(f"Failed to upload {filename}: {str(e)}")
+        # Pass user_id to your upload function to prefix files
+        uploaded, errors = upload_files_to_s3(files, user_id)
 
         if not uploaded and errors:
             return jsonify({"error": errors}), 500
@@ -82,3 +43,36 @@ def upload_files():
     except Exception as e:
         print(f"[FATAL] Unexpected error during upload: {e}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+@main.route('/api/invoices/extract', methods=['POST'])
+def extract():
+    try:
+        data = request.get_json(silent=True) or {}
+        filenames = data.get("filenames")
+        username = data.get("username")
+
+        if not username:
+            return jsonify({"error": "Username not provided"}), 400
+
+        args = [username]
+
+        if filenames:
+            args.append(json.dumps(filenames))
+
+        extract_script = os.path.join(os.path.dirname(__file__), "extract.py")
+
+        result = subprocess.run(
+            [sys.executable, extract_script, *args],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        print("[extract.py output]")
+        print(result.stdout)
+
+        return jsonify({"message": "Extraction started", "output": result.stdout}), 200
+
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] Extract failed: {e.stderr}")
+        return jsonify({"error": "Extraction failed", "details": e.stderr}), 500

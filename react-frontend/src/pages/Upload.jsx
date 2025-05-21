@@ -4,7 +4,12 @@ import "./css/Upload.css";
 function Upload() {
   const [files, setFiles] = useState([]);
   const [status, setStatus] = useState("");
+  const [uploadedFiles, setUploadedFiles] = useState([]); // Track uploaded filenames
+  const [extractStatus, setExtractStatus] = useState("");
   const fileInputRef = useRef(null);
+
+  // Get the logged-in user from localStorage
+  const userId = localStorage.getItem("username");
 
   const validateFiles = (fileList) => {
     const allowedTypes = ["application/pdf"];
@@ -28,8 +33,12 @@ function Upload() {
     if (validateFiles(selectedFiles)) {
       setFiles(selectedFiles);
       setStatus("");
+      setUploadedFiles([]); // Reset uploaded files on new selection
+      setExtractStatus("");
     } else {
       setFiles([]);
+      setUploadedFiles([]);
+      setExtractStatus("");
     }
   };
 
@@ -38,6 +47,7 @@ function Upload() {
 
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
+    formData.append("user_id", userId); // Add user_id to form data
 
     try {
       const res = await fetch("/api/invoices/upload", {
@@ -49,6 +59,7 @@ function Upload() {
 
       if (res.ok) {
         setStatus(`✅ Uploaded ${data.filenames.length} file(s) successfully.`);
+        setUploadedFiles(data.filenames);
         setFiles([]);
         if (fileInputRef.current) {
           fileInputRef.current.value = null;
@@ -56,10 +67,43 @@ function Upload() {
       } else {
         const errorMessage = data?.error || "Something went wrong.";
         setStatus(`❌ ${errorMessage}`);
+        setUploadedFiles([]);
       }
     } catch (error) {
       console.error("Upload failed:", error);
       setStatus("❌ Network error. Try again.");
+      setUploadedFiles([]);
+    }
+  };
+
+  const handleExtract = async () => {
+    if (uploadedFiles.length === 0) {
+      setExtractStatus("❌ No files uploaded to extract.");
+      return;
+    }
+    setExtractStatus("⏳ Extraction in progress...");
+
+    try {
+      const username = localStorage.getItem("username") || "";
+
+      const res = await fetch("/api/invoices/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filenames: uploadedFiles, username }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setExtractStatus(`✅ Extraction completed successfully.`);
+        console.log("Extraction output:", data);
+      } else {
+        const errorMessage = data?.error || "Extraction failed.";
+        setExtractStatus(`❌ ${errorMessage}`);
+      }
+    } catch (error) {
+      console.error("Extraction failed:", error);
+      setExtractStatus("❌ Network error during extraction.");
     }
   };
 
@@ -100,6 +144,20 @@ function Upload() {
         )}
 
         {status && <p className="status">{status}</p>}
+
+        {/* Show Extract button only after successful upload */}
+        {uploadedFiles.length > 0 && (
+          <>
+            <button
+              onClick={handleExtract}
+              className="btn extract-btn"
+              style={{ marginTop: "1rem" }}
+            >
+              Begin Extraction
+            </button>
+            {extractStatus && <p className="status">{extractStatus}</p>}
+          </>
+        )}
       </div>
     </div>
   );

@@ -1,18 +1,46 @@
 import boto3
 import time
 import os
-import csv
+import sys
+from dotenv import load_dotenv
 
-# ── CONFIGURATION ──────────────────────────────────────────────────────
-AWS_REGION         = "ap-south-1"
-S3_BUCKET          = "cargofl-ai-invoice-reader-test"
-DOCUMENT_KEY       = "FTL_Bill.pdf"             # S3 key for the PDF
-OUTPUT_DIR         = "./textract_tables"        # Local directory to save CSVs
-POLL_INTERVAL      = 5                          # Seconds between polling Textract
-# ───────────────────────────────────────────────────────────────────────
+# Load environment variables from .env
+load_dotenv()
 
-# —— SETUP CLIENTS ——  
-textract = boto3.client("textract", region_name=AWS_REGION)
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
+S3_BUCKET = os.getenv("S3_BUCKET", "cargofl-ai-invoice-reader-test")
+S3_UPLOAD_PREFIX = "uploads"
+POLL_INTERVAL = 5  # seconds
+
+# Setup boto3 clients
+s3 = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+)
+
+textract = boto3.client(
+    "textract",
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+)
+
+def list_pdf_files(bucket, user_prefix):
+    """List all PDF files under the user-specific prefix in the S3 bucket."""
+    paginator = s3.get_paginator("list_objects_v2")
+    pdf_files = []
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=user_prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if key.lower().endswith(".pdf"):
+                pdf_files.append(key)
+
+    return pdf_files
 
 def start_table_detection(bucket, key):
     resp = textract.start_document_analysis(
@@ -57,8 +85,8 @@ def extract_tables(pages):
                     if cell["BlockType"] == "CELL":
                         cells.append(cell)
 
-        max_row = max(cell["RowIndex"] for cell in cells)
-        max_col = max(cell["ColumnIndex"] for cell in cells)
+        max_row = max(cell["RowIndex"] for cell in cells) if cells else 0
+        max_col = max(cell["ColumnIndex"] for cell in cells) if cells else 0
         grid = [["" for _ in range(max_col)] for _ in range(max_row)]
 
         for cell in cells:
@@ -76,42 +104,66 @@ def extract_tables(pages):
         all_tables.append(grid)
     return all_tables
 
-def save_tables_to_csv(tables, outdir):
-    os.makedirs(outdir, exist_ok=True)
-    for tbl_idx, grid in tables:
-        csv_path = os.path.join(outdir, f"table_{tbl_idx}.csv")
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            for row in grid:
-                writer.writerow(row)
-        print(f"[INFO] Wrote Table {tbl_idx} → {csv_path}")
+def print_tables(tables, document_key):
+    if not tables:
+        print(f"[WARN] No tables found in document: {document_key}")
+        return
 
-def main():
+    print(f"[INFO] Extracted {len(tables)} table(s) from document: {document_key}\n")
+    for idx, table in enumerate(tables):
+        print(f"--- Table {idx + 1} ---")
+        for row in table:
+            print(row)
+        print("\n")
+
+def delete_file_from_s3(bucket, key):
     try:
-        print("[INFO] Starting Textract TABLE analysis job...")
-        job_id = start_table_detection(S3_BUCKET, DOCUMENT_KEY)
-        print(f"[INFO] Job started. JobId: {job_id}")
+        s3.delete_object(Bucket=bucket, Key=key)
+        print(f"[INFO] Deleted file from S3: {key}")
+    except Exception as e:
+        print(f"[ERROR] Failed to delete {key} from S3: {e}")
 
-        while True:
-            status, resp = is_job_complete(job_id)
-            print(f"[INFO] Job status: {status}")
-            if status in ("SUCCEEDED", "FAILED"):
-                break
-            time.sleep(POLL_INTERVAL)
+def process_document(bucket, key):
+    print(f"[INFO] Starting Textract TABLE analysis for {key}...")
+    job_id = start_table_detection(bucket, key)
+    print(f"[INFO] Job started. JobId: {job_id}")
 
-        if status == "SUCCEEDED":
-            print("[INFO] Job succeeded; fetching results...")
-            pages = get_all_results(job_id)
-            tables = list(extract_tables(pages))
-            if tables:
-                save_tables_to_csv(tables, OUTPUT_DIR)
-                print(f"[INFO] Extracted {len(tables)} table(s).")
-            else:
-                print("[WARN] No tables found in document.")
-        else:
-            print(f"[ERROR] Textract job failed: {resp}")
+    while True:
+        status, resp = is_job_complete(job_id)
+        print(f"[INFO] Job status for {key}: {status}")
+        if status in ("SUCCEEDED", "FAILED"):
+            break
+        time.sleep(POLL_INTERVAL)
+
+    if status == "SUCCEEDED":
+        pages = get_all_results(job_id)
+        tables = extract_tables(pages)
+        print_tables(tables, key)
+        # Delete file after successful extraction
+        delete_file_from_s3(bucket, key)
+    else:
+        print(f"[ERROR] Textract job failed for {key}: {resp}")
+
+def main(user_id=None):
+    if not user_id:
+        print("[ERROR] User ID is required to scope files for extraction.")
+        return
+
+    user_prefix = f"{S3_UPLOAD_PREFIX}/{user_id}/"
+    try:
+        pdf_files = list_pdf_files(S3_BUCKET, user_prefix)
+        if not pdf_files:
+            print(f"[INFO] No PDF files found in S3 bucket for user {user_id}.")
+            return
+
+        for pdf_key in pdf_files:
+            process_document(S3_BUCKET, pdf_key)
+
     except Exception as e:
         print(f"[FATAL] Unexpected error: {e}")
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 2:
+        print("Usage: python extract.py <user_id>")
+    else:
+        main(sys.argv[1])
