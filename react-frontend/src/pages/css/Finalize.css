@@ -1,0 +1,89 @@
+.finalize-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  padding: 1rem; /* add some padding to prevent content from touching edges on small screens */
+  box-sizing: border-box;
+}
+
+.finalize-content {
+  position: relative;
+  background-color: #ffffff;
+  padding: 2rem 2.5rem 2rem 2rem; /* extra right padding for close button */
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  border-radius: 8px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
+  color: #111827;
+  font-family: Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+.finalize-close-btn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 36px;
+  height: 36px;
+  font-size: 28px;
+  line-height: 36px;
+  text-align: center;
+  background: red;
+  border: none;
+  cursor: pointer;
+  color: white;
+  font-weight: bold;
+  padding: 0;
+  user-select: none;
+  transition: color 0.2s ease;
+  border-radius: 4px;
+  z-index: 1000;
+}
+
+
+
+.finalize-close-btn:hover {
+  color: darkred;
+  background-color: rgba(255, 0, 0, 0.1);
+}
+
+/* Finalize action button */
+.finalize-btn {
+  margin-top: 1.5rem;
+  padding: 12px 24px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+  display: inline-block;
+  min-width: 120px;
+  text-align: center;
+}
+
+.finalize-btn:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.finalize-btn:disabled {
+  background-color: gray;
+  cursor: not-allowed;
+}
+
+/* Save status message */
+.finalize-status {
+  margin-top: 1rem;
+  font-weight: 600;
+  font-size: 1rem;
+  color: #222;
+}

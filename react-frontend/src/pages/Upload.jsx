@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import Finalize from "./Finalize";
 import "./css/Upload.css";
 
 function Upload() {
@@ -6,10 +7,11 @@ function Upload() {
   const [status, setStatus] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState([]); // Track uploaded filenames
   const [extractStatus, setExtractStatus] = useState("");
+  const [showFinalize, setShowFinalize] = useState(false);
   const fileInputRef = useRef(null);
 
   // Get the logged-in user from localStorage
-  const userId = localStorage.getItem("username");
+  const userId = localStorage.getItem("user_id");
 
   const validateFiles = (fileList) => {
     const allowedTypes = ["application/pdf"];
@@ -35,10 +37,12 @@ function Upload() {
       setStatus("");
       setUploadedFiles([]); // Reset uploaded files on new selection
       setExtractStatus("");
+      setShowFinalize(false); // Reset finalize overlay on new selection
     } else {
       setFiles([]);
       setUploadedFiles([]);
       setExtractStatus("");
+      setShowFinalize(false);
     }
   };
 
@@ -84,18 +88,19 @@ function Upload() {
     setExtractStatus("⏳ Extraction in progress...");
 
     try {
-      const username = localStorage.getItem("username") || "";
+      const user_id = localStorage.getItem("user_id") || "";
 
       const res = await fetch("/api/invoices/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filenames: uploadedFiles, username }),
+        body: JSON.stringify({ filenames: uploadedFiles, user_id }),
       });
 
       const data = await res.json();
 
       if (res.ok) {
         setExtractStatus(`✅ Extraction completed successfully.`);
+        setShowFinalize(true); // Show Finalize overlay after success
         console.log("Extraction output:", data);
       } else {
         const errorMessage = data?.error || "Extraction failed.";
@@ -159,6 +164,10 @@ function Upload() {
           </>
         )}
       </div>
+
+      {showFinalize && (
+        <Finalize userId={userId} onClose={() => setShowFinalize(false)} />
+      )}
     </div>
   );
 }

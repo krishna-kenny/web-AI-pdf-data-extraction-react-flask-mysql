@@ -2,6 +2,7 @@ import boto3
 import time
 import os
 import sys
+import json
 from dotenv import load_dotenv
 
 # Load environment variables from .env
@@ -104,17 +105,18 @@ def extract_tables(pages):
         all_tables.append(grid)
     return all_tables
 
-def print_tables(tables, document_key):
-    if not tables:
-        print(f"[WARN] No tables found in document: {document_key}")
-        return
-
-    print(f"[INFO] Extracted {len(tables)} table(s) from document: {document_key}\n")
-    for idx, table in enumerate(tables):
-        print(f"--- Table {idx + 1} ---")
-        for row in table:
-            print(row)
-        print("\n")
+def save_table_to_json_and_upload(table, bucket, prefix, filename):
+    """
+    Save a 2D table list as JSON and upload to S3.
+    """
+    json_content = json.dumps(table)
+    s3.put_object(
+        Bucket=bucket,
+        Key=f"{prefix}/{filename}",
+        Body=json_content.encode('utf-8'),
+        ContentType='application/json'
+    )
+    print(f"[INFO] Uploaded table as {prefix}/{filename} to S3.")
 
 def delete_file_from_s3(bucket, key):
     try:
@@ -123,7 +125,7 @@ def delete_file_from_s3(bucket, key):
     except Exception as e:
         print(f"[ERROR] Failed to delete {key} from S3: {e}")
 
-def process_document(bucket, key):
+def process_document(bucket, key, doc_index):
     print(f"[INFO] Starting Textract TABLE analysis for {key}...")
     job_id = start_table_detection(bucket, key)
     print(f"[INFO] Job started. JobId: {job_id}")
@@ -138,8 +140,21 @@ def process_document(bucket, key):
     if status == "SUCCEEDED":
         pages = get_all_results(job_id)
         tables = extract_tables(pages)
-        print_tables(tables, key)
-        # Delete file after successful extraction
+        if not tables:
+            print(f"[WARN] No tables found in document: {key}")
+        else:
+            # Get prefix/folder path for uploading JSONs, e.g. uploads/user_id/
+            user_prefix = "/".join(key.split("/")[:-1])
+
+            # Extract the base pdf filename without extension
+            pdf_filename = os.path.splitext(os.path.basename(key))[0]
+
+            for idx, table in enumerate(tables):
+                # Compose filename as pdfname_1.json, pdfname_2.json, etc.
+                filename = f"{pdf_filename}_{idx + 1}.json"
+                save_table_to_json_and_upload(table, bucket, user_prefix, filename)
+
+        # Delete original PDF after successful extraction
         delete_file_from_s3(bucket, key)
     else:
         print(f"[ERROR] Textract job failed for {key}: {resp}")
@@ -156,8 +171,8 @@ def main(user_id=None):
             print(f"[INFO] No PDF files found in S3 bucket for user {user_id}.")
             return
 
-        for pdf_key in pdf_files:
-            process_document(S3_BUCKET, pdf_key)
+        for i, pdf_key in enumerate(pdf_files, 1):
+            process_document(S3_BUCKET, pdf_key, i)
 
     except Exception as e:
         print(f"[FATAL] Unexpected error: {e}")

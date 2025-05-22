@@ -2,18 +2,18 @@ import React, { useState } from "react";
 import "./css/Auth.css";
 
 export default function Auth({ onAuthSuccess }) {
-  const [username, setUsername] = useState("");
+  const [user_id, setuser_id] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (username === "k" && password === "k") {
-      localStorage.setItem("username", username); // Store logged-in user
+    if (user_id === password) {
+      localStorage.setItem("user_id", user_id); // Store logged-in user
       setError("");
       onAuthSuccess();
     } else {
-      setError("Incorrect username or password");
+      setError("Incorrect user_id or password");
     }
   };
 
@@ -23,9 +23,9 @@ export default function Auth({ onAuthSuccess }) {
         <form className="auth-form" onSubmit={handleSubmit}>
           <input
             type="text"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            placeholder="user_id"
+            value={user_id}
+            onChange={(e) => setuser_id(e.target.value)}
             required
             autoFocus
             className="auth-input"
